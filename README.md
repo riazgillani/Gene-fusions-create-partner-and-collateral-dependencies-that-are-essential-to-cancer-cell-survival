@@ -10,4 +10,4 @@ Additionally, results (including figures and supplementary materials) available 
 
 # Dependencies
 
-All analysis was done in R (v.3.6.1) using the RStudio GUI (v.1.2.5001).
+All analysis was done in R (v.3.6.1) using the RStudio GUI (v.1.2.5001). Select logistic regression analyses were carried out on a virtual machine with R software through the Terra Google Cloud Platform. 
