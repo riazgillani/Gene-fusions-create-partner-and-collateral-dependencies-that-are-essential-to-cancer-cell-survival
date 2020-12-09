@@ -1,0 +1,336 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(stringr)
+library(useful)
+library(here)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(sqldf)
+library(matrixTests)
+library(pryr)
+library(VennDiagram)
+library(ggbeeswarm)
+library(ggridges)
+library(ggpubr)
+library(scales)
+library(parallel)
+library(statmod)
+library(ggrepel)
+library(rentrez)
+library(biomaRt)
+library(ggforestplot)
+library(forestplot)
+library(grid)
+library(devtools)
+library(graph)
+library(GenomicRanges)
+library(BiocGenerics)
+library(S4Vectors)
+library(IRanges)
+library(MASS)
+library(gridExtra)
+library(cowplot)
+library(ShatterSeek)
+library(svglite)
+
+```
+
+#Loading datatables
+```{r}
+
+CCLE_segment_cn_hg19 <- read_csv(here::here("data","CCLE_segmented_cn_hg19.csv"))
+
+CCLE_translocations_SvABA_20181221 <- read_tsv(here::here("results/datatables","CCLE_translocations_SvABA_20181221.txt"))
+
+list_of_fusions_with_related_dependencies_and_associated_cell_lines_with_orthogonal_WGS_data_annotated_with_TADs_all <- read_tsv(here::here("results/datatables","list_of_fusions_with_related_dependencies_and_associated_cell_lines_with_orthogonal_WGS_data_annotated_with_TADs_all.tsv"))
+
+distinct_fusion_dependency_pairings <- read_tsv(here::here("results/datatables","distinct_fusion_dependency_pairings.tsv"))
+
+```
+
+#Shatterseek datatables
+```{r}
+#Formatted structural variant data (hg19)
+
+allowable_chromosome_identifiers <- c(1:22,"X")
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 <- CCLE_translocations_SvABA_20181221 %>% mutate(chrom1 = str_split_fixed(bp1,"[:-]",3)[,1], pos1 = str_split_fixed(bp1,"[:-]",3)[,2] %>% as.integer(), strand1 = str_split_fixed(bp1,"[:-]",3)[,3] %>% str_extract("[+-]"), chrom2 = str_split_fixed(bp2,"[:-]",3)[,1], pos2 = str_split_fixed(bp2,"[:-]",3)[,2] %>% as.integer(), strand2 = str_split_fixed(bp2,"[:-]",3)[,3] %>% str_extract("[+-]"), SVtype = ifelse(class == "DEL-like","DEL",ifelse(class == "DUP-like","DUP",ifelse(strand1 == "+" & strand2 == "+","h2hINV",ifelse(strand1 == "-" & strand2 == "-","t2tINV",""))))) %>% filter(chrom1 %in% allowable_chromosome_identifiers & chrom2 %in% allowable_chromosome_identifiers)
+
+#Formatted copy number data (hg19)
+
+CCLE_segment_cn_for_Shatterseek_hg19 <- CCLE_segment_cn_hg19 %>% mutate(CN = round(Segment_Mean*2)) %>% dplyr::select(DepMap_ID,CCLE_name,Chromosome,Start,End,CN) %>% filter(Chromosome %in% allowable_chromosome_identifiers)
+
+```
+
+#Shatterseek analysis and visualization of NCIN87 cell line chromosome 17
+```{r}
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87 <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 %>% filter(CCLE_name == "NCIN87_STOMACH")
+
+NCIN87_SV_data <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87$strand2))
+
+CCLE_segment_cn_for_Shatterseek_hg19_NCIN87 <- CCLE_segment_cn_for_Shatterseek_hg19 %>% filter(CCLE_name == "NCIN87_STOMACH")
+
+NCIN87_CN_data <- CNVsegs(chrom = as.character(CCLE_segment_cn_for_Shatterseek_hg19_NCIN87$Chromosome),
+                         start = CCLE_segment_cn_for_Shatterseek_hg19_NCIN87$Start,
+                         end = CCLE_segment_cn_for_Shatterseek_hg19_NCIN87$End,
+                         total_cn = CCLE_segment_cn_for_Shatterseek_hg19_NCIN87$CN)
+
+NCIN87_shatterseek_object <- shatterseek(SV.sample = NCIN87_SV_data, seg.sample = NCIN87_CN_data)
+
+NCIN87_plots_chr17 <- plot_chromothripsis(ShatterSeek_output = NCIN87_shatterseek_object, chr = "17", arc_size = 2)
+
+NCIN87_plots_chr17_arranged <- arrangeGrob(NCIN87_plots_chr17[[1]], NCIN87_plots_chr17[[2]], NCIN87_plots_chr17[[3]], nrow=3,ncol=1,heights=c(0.4,0.4,0.4))
+
+#Zoomed in
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87 %>% filter(chrom1 == 17 & pos1 >= 36500000 & chrom2 == 17 & pos1 <= 38500000)
+
+NCIN87_SV_data_chrom17_zoom <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_NCIN87_chrom17_zoom$strand2))
+
+NCIN87_shatterseek_object_chrom17_zoom <- shatterseek(SV.sample = NCIN87_SV_data_chrom17_zoom, seg.sample = NCIN87_CN_data)
+
+NCIN87_plots_chr17_chrom17_zoom <- plot_chromothripsis(ShatterSeek_output = NCIN87_shatterseek_object_chrom17_zoom, chr = "17", arc_size = 2)
+
+#Plotting
+
+NCIN87_shatterseek_3_panel_plot_chr17 <- plot_grid(NCIN87_plots_chr17_arranged)
+
+NCIN87_shatterseek_3_panel_plot_chr17_zoom <- plot_grid(NCIN87_plots_chr17_chrom17_zoom[[2]])
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","NCIN87_shatterseek_3_panel_plot_chr17.svg"),NCIN87_shatterseek_3_panel_plot_chr17)
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","NCIN87_shatterseek_3_panel_plot_chr17_zoom.svg"),NCIN87_shatterseek_3_panel_plot_chr17_zoom)
+
+```
+
+#Shatterseek analysis and visualization of DU4475 cell line chromosome 1
+```{r}
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475 <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 %>% filter(CCLE_name == "DU4475_BREAST")
+
+DU4475_SV_data <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475$strand2))
+
+CCLE_segment_cn_for_Shatterseek_hg19_DU4475 <- CCLE_segment_cn_for_Shatterseek_hg19 %>% filter(CCLE_name == "DU4475_BREAST")
+
+DU4475_CN_data <- CNVsegs(chrom = as.character(CCLE_segment_cn_for_Shatterseek_hg19_DU4475$Chromosome),
+                         start = CCLE_segment_cn_for_Shatterseek_hg19_DU4475$Start,
+                         end = CCLE_segment_cn_for_Shatterseek_hg19_DU4475$End,
+                         total_cn = CCLE_segment_cn_for_Shatterseek_hg19_DU4475$CN)
+
+DU4475_shatterseek_object <- shatterseek(SV.sample = DU4475_SV_data, seg.sample = DU4475_CN_data)
+
+DU4475_plots_chr1 <- plot_chromothripsis(ShatterSeek_output = DU4475_shatterseek_object, chr = "1", arc_size = 2)
+
+DU4475_plots_chr1_arranged <- arrangeGrob(DU4475_plots_chr1[[1]], DU4475_plots_chr1[[2]], DU4475_plots_chr1[[3]], nrow=3,ncol=1,heights=c(0.4,0.4,0.4))
+
+#Zoomed in
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475 %>% filter(chrom1 == 1 & pos1 >= 155000000 & chrom2 == 1 & pos2 <= 156000000)
+
+DU4475_SV_data_chrom1_zoom <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_DU4475_chrom1_zoom$strand2))
+
+DU4475_shatterseek_object_chrom1_zoom <- shatterseek(SV.sample = DU4475_SV_data_chrom1_zoom, seg.sample = DU4475_CN_data)
+
+DU4475_plots_chr1_chrom1_zoom <- plot_chromothripsis(ShatterSeek_output = DU4475_shatterseek_object_chrom1_zoom, chr = "1", arc_size = 1)
+
+#Plotting
+
+DU4475_shatterseek_3_panel_plot_chr1 <- plot_grid(DU4475_plots_chr1_arranged)
+
+DU4475_shatterseek_3_panel_plot_chr1_zoom <- plot_grid(DU4475_plots_chr1_chrom1_zoom[[2]])
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","DU4475_shatterseek_3_panel_plot_chr1.svg"),DU4475_shatterseek_3_panel_plot_chr1)
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","DU4475_shatterseek_3_panel_plot_chr1_zoom.svg"),DU4475_shatterseek_3_panel_plot_chr1_zoom)
+
+```
+
+#Shatterseek analysis and visualization of THP1 cell line chromosome X
+```{r}
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1 <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 %>% filter(CCLE_name == "THP1_HAEMATOPOIETIC_AND_LYMPHOID_TISSUE")
+
+THP1_SV_data <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1$strand2))
+
+CCLE_segment_cn_for_Shatterseek_hg19_THP1 <- CCLE_segment_cn_for_Shatterseek_hg19 %>% filter(CCLE_name == "THP1_HAEMATOPOIETIC_AND_LYMPHOID_TISSUE")
+
+THP1_CN_data <- CNVsegs(chrom = as.character(CCLE_segment_cn_for_Shatterseek_hg19_THP1$Chromosome),
+                         start = CCLE_segment_cn_for_Shatterseek_hg19_THP1$Start,
+                         end = CCLE_segment_cn_for_Shatterseek_hg19_THP1$End,
+                         total_cn = CCLE_segment_cn_for_Shatterseek_hg19_THP1$CN)
+
+THP1_shatterseek_object <- shatterseek(SV.sample = THP1_SV_data, seg.sample = THP1_CN_data)
+
+THP1_plots_chrX <- plot_chromothripsis(ShatterSeek_output = THP1_shatterseek_object, chr = "X", arc_size = 2)
+
+THP1_plots_chrX_arranged <- arrangeGrob(THP1_plots_chrX[[1]], THP1_plots_chrX[[2]], THP1_plots_chrX[[3]], nrow=3,ncol=1,heights=c(0.4,0.4,0.4))
+
+#Zoomed in
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1 %>% filter(chrom1 == "X" & pos1 >= 153000000 & chrom2 == "X" & pos2 <= 154000000)
+
+THP1_SV_data_chromX_zoom <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_THP1_chromX_zoom$strand2))
+
+THP1_shatterseek_object_chromX_zoom <- shatterseek(SV.sample = THP1_SV_data_chromX_zoom, seg.sample = THP1_CN_data)
+
+THP1_plots_chrX_chromX_zoom <- plot_chromothripsis(ShatterSeek_output = THP1_shatterseek_object_chromX_zoom, chr = "X", arc_size = 1)
+
+#Plotting
+
+THP1_shatterseek_3_panel_plot_chrX <- plot_grid(THP1_plots_chrX_arranged)
+
+THP1_shatterseek_3_panel_plot_chrX_zoom <- plot_grid(THP1_plots_chrX_chromX_zoom[[2]])
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","THP1_shatterseek_3_panel_plot_chrX.svg"),THP1_shatterseek_3_panel_plot_chrX)
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","THP1_shatterseek_3_panel_plot_chrX_zoom.svg"),THP1_shatterseek_3_panel_plot_chrX_zoom)
+
+```
+
+#Shatterseek analysis and visualization of HCC38 cell line chromosome 17
+```{r}
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38 <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 %>% filter(CCLE_name == "HCC38_BREAST")
+
+HCC38_SV_data <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38$strand2))
+
+CCLE_segment_cn_for_Shatterseek_hg19_HCC38 <- CCLE_segment_cn_for_Shatterseek_hg19 %>% filter(CCLE_name == "HCC38_BREAST")
+
+HCC38_CN_data <- CNVsegs(chrom = as.character(CCLE_segment_cn_for_Shatterseek_hg19_HCC38$Chromosome),
+                         start = CCLE_segment_cn_for_Shatterseek_hg19_HCC38$Start,
+                         end = CCLE_segment_cn_for_Shatterseek_hg19_HCC38$End,
+                         total_cn = CCLE_segment_cn_for_Shatterseek_hg19_HCC38$CN)
+
+HCC38_shatterseek_object <- shatterseek(SV.sample = HCC38_SV_data, seg.sample = HCC38_CN_data)
+
+HCC38_plots_chr17 <- plot_chromothripsis(ShatterSeek_output = HCC38_shatterseek_object, chr = "17", arc_size = 2)
+
+HCC38_plots_chr17_arranged <- arrangeGrob(HCC38_plots_chr17[[1]], HCC38_plots_chr17[[2]], HCC38_plots_chr17[[3]], nrow=3,ncol=1,heights=c(0.4,0.4,0.4))
+
+#Zoomed in
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38 %>% filter(chrom1 == "17" & pos1 >= 40000000 & chrom2 == "17" & pos2 <= 41000000)
+
+HCC38_SV_data_chrom17_zoom <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_HCC38_chrom17_zoom$strand2))
+
+HCC38_shatterseek_object_chrom17_zoom <- shatterseek(SV.sample = HCC38_SV_data_chrom17_zoom, seg.sample = THP1_CN_data)
+
+HCC38_plots_chr17_chrom17_zoom <- plot_chromothripsis(ShatterSeek_output = HCC38_shatterseek_object_chrom17_zoom, chr = "17", arc_size = 1)
+
+#Plotting
+
+HCC38_shatterseek_3_panel_plot_chr17 <- plot_grid(HCC38_plots_chr17_arranged)
+
+HCC38_shatterseek_3_panel_plot_chr17_zoom <- plot_grid(HCC38_plots_chr17_chrom17_zoom[[2]])
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","HCC38_shatterseek_3_panel_plot_chr17.svg"),HCC38_shatterseek_3_panel_plot_chr17)
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","HCC38_shatterseek_3_panel_plot_chr17_zoom.svg"),HCC38_shatterseek_3_panel_plot_chr17_zoom)
+
+```
+
+#ShatterSeek analysis and visualization of PANC1 cell line chromosome 19
+```{r}
+
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1 <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19 %>% filter(CCLE_name == "PANC1_PANCREAS")
+
+PANC1_SV_data <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1$strand2))
+
+CCLE_segment_cn_for_Shatterseek_hg19_PANC1 <- CCLE_segment_cn_for_Shatterseek_hg19 %>% filter(CCLE_name == "PANC1_PANCREAS")
+
+PANC1_CN_data <- CNVsegs(chrom = as.character(CCLE_segment_cn_for_Shatterseek_hg19_PANC1$Chromosome),
+                         start = CCLE_segment_cn_for_Shatterseek_hg19_PANC1$Start,
+                         end = CCLE_segment_cn_for_Shatterseek_hg19_PANC1$End,
+                         total_cn = CCLE_segment_cn_for_Shatterseek_hg19_PANC1$CN)
+
+PANC1_shatterseek_object <- shatterseek(SV.sample = PANC1_SV_data, seg.sample = PANC1_CN_data)
+
+PANC1_plots_chr19 <- plot_chromothripsis(ShatterSeek_output = PANC1_shatterseek_object, chr = "19", arc_size = 2)
+
+PANC1_plots_chr19_arranged <- arrangeGrob(PANC1_plots_chr19[[1]], PANC1_plots_chr19[[2]], PANC1_plots_chr19[[3]], nrow=3,ncol=1,heights=c(0.4,0.4,0.4))
+
+#Zoomed in
+CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom <- CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1 %>% filter(chrom1 == 19 & pos1 >= 35000000 & chrom2 == 19 & pos2 <= 45000000)
+
+PANC1_SV_data_chrom19_zoom <- SVs(chrom1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$chrom1),
+                     pos1 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$pos1),
+                     chrom2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$chrom2),
+                     pos2 = as.numeric(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$pos2),
+                     SVtype = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$SVtype),
+                     strand1 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$strand1),
+                     strand2 = as.character(CCLE_translocations_SvABA_20181221_for_Shatterseek_hg19_PANC1_chrom19_zoom$strand2))
+
+PANC1_shatterseek_object_chrom19_zoom <- shatterseek(SV.sample = PANC1_SV_data_chrom19_zoom, seg.sample = PANC1_CN_data)
+
+PANC1_plots_chr19_chrom19_zoom <- plot_chromothripsis(ShatterSeek_output = PANC1_shatterseek_object_chrom19_zoom, chr = "19", arc_size = 1)
+
+#Plotting
+
+PANC1_shatterseek_3_panel_plot_chr19 <- plot_grid(PANC1_plots_chr19_arranged)
+
+PANC1_shatterseek_3_panel_plot_chr19_zoom <- plot_grid(PANC1_plots_chr19_chrom19_zoom[[2]])
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","PANC1_shatterseek_3_panel_plot_chr19.svg"),PANC1_shatterseek_3_panel_plot_chr19)
+
+ggsave(here::here("results/TAD_fusion_dependency_and_expression_summary_plots","PANC1_shatterseek_3_panel_plot_chr19_zoom.svg"),PANC1_shatterseek_3_panel_plot_chr19_zoom)
+
+```

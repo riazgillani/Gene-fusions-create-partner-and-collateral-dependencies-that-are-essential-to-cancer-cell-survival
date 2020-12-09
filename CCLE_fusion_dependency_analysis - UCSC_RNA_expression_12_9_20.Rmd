@@ -1,0 +1,106 @@
+---
+title: "UCSC_RNA_expression"
+author: "Riaz Gillani"
+date: "7/8/2020"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(useful)
+library(here)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+
+```
+
+#Loading datasets
+```{r}
+ucsc_tumor_metadata <- read_tsv(here::here("data","clinical_TumorCompendium_v11_PolyA_2020-04-09.tsv"))
+
+ucsc_tpm_expression <- read_tsv(here::here("data","TumorCompendium_v11_PolyA_hugo_log2tpm_58581genes_2020-04-09.tsv"))
+
+tcga_fusion_list <- read_tsv(here::here("data","tcga_fusion_list.txt"))
+
+tcga_fusion_list %>% filter(LeftGene == "FOXR1" | RightGene == "FOXR1")
+
+ccle_expression_protein_coding_log2tpm_genes <- read_tsv(here::here("results/datatables","ccle_expression_protein_coding_log2tpm_colnames_tibble.tsv")) %>% unlist() %>% unname()
+
+TARGET_neuroblastoma_metadata <- read_tsv(here::here("data","TARGET_NBL_ClinicalData_Discovery_20170525.txt"))
+
+hallmark_gene_sets_tibble <-  msigdbr(species = "Homo sapiens", category = "H")
+
+hallmark_gene_set_names <- hallmark_gene_sets_tibble %>% distinct(gs_name) %>% unlist() %>% unname()
+
+hallmark_gene_sets_list <- list()
+
+count = 0
+
+for(set in hallmark_gene_set_names){
+
+hallmark_gene_sets_list[[set]] <- hallmark_gene_sets_tibble %>% filter(gs_name == set) %>% distinct(gene_symbol) %>% unlist() %>% unname()  
+
+count = count+1
+print(count)
+  
+}
+
+```
+
+#FOXR1 expression
+```{r}
+ucsc_tpm_expression_FOXR1 <- ucsc_tpm_expression %>% filter(Gene == "FOXR1")
+
+ucsc_tpm_expression_FOXR1_tpm <- ucsc_tpm_expression_FOXR1 %>% t() %>% as_tibble()
+
+ucsc_tpm_expression_FOXR1_samples <- ucsc_tpm_expression_FOXR1 %>% colnames()
+
+ucsc_tpm_expression_FOXR1_reformatted <- tibble(sample = ucsc_tpm_expression_FOXR1_samples, tpm = ucsc_tpm_expression_FOXR1_tpm$V1)
+ucsc_tpm_expression_FOXR1_reformatted <- ucsc_tpm_expression_FOXR1_reformatted[-1,]
+ucsc_tpm_expression_FOXR1_reformatted$tpm <- ucsc_tpm_expression_FOXR1_reformatted$tpm %>% as.double()
+
+ucsc_tpm_expression_FOXR1_reformatted <- ucsc_tpm_expression_FOXR1_reformatted %>% mutate(log2_tpm_greater_than_two = ifelse(tpm > 2, "log2(TPM + 1) > 2", "log2(TPM + 1) ≤ 2"))
+
+ucsc_tpm_expression_FOXR1_reformatted %>% filter(!is.na(tpm))
+
+samples_with_FOXR1_log2_tpm_greater_than_two <- ucsc_tpm_expression_FOXR1_reformatted %>% filter(log2_tpm_greater_than_two == "log2(TPM + 1) > 2")
+
+ucsc_tpm_expression_FOXR1_reformatted %>% summarise(mean(tpm)) %>% unlist() %>% unname()
+
+samples_with_FOXR1_log2_tpm_greater_than_two_sample_information <- ucsc_tumor_metadata %>% filter(th_sampleid %in% samples_with_FOXR1_log2_tpm_greater_than_two$sample)
+
+samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary <- samples_with_FOXR1_log2_tpm_greater_than_two_sample_information %>% group_by(disease) %>% summarise(count = n()) %>% mutate(disease_group = c("Other","Other","Other","Other","Neuroblastoma","Testicular germ cell tumor","Thymoma","Thyroid carcinoma","Other"))
+
+samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary_disease_group <- samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary %>% group_by(disease_group) %>% summarise(count = sum(count))
+
+samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary_disease_group$disease_group <- factor(samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary_disease_group$disease_group, levels = c("Other", "Thyroid carcinoma", "Neuroblastoma", "Thymoma", "Testicular germ cell tumor"))
+
+ucsc_tpm_expression_FOXR1_reformatted_scatter_plot <- ggplot(data = ucsc_tpm_expression_FOXR1_reformatted, mapping = aes(x = "", y = tpm, color = log2_tpm_greater_than_two)) + geom_jitter() + scale_color_manual(values = c("red","black")) + geom_hline(yintercept = 2, linetype = "dashed", color = "black", size = 1) + labs(title = "FOXR1 RNA expression across\nUCSC Treehouse cancer samples", x = "", y = expression(log[2](TPM+1)))+ theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.ticks.x=element_blank(), axis.text.y = element_text(size = 20, color = "black"), axis.text.x = element_text(size = 20, color = "black"), axis.title = element_text(size = 20, color = "black"), title = element_text(size = 20, color = "black"), legend.position="none")
+
+ggsave(filename = here::here("results/ucsc_rna_expression","ucsc_tpm_expression_FOXR1_reformatted_scatter_plot.png"), plot = ucsc_tpm_expression_FOXR1_reformatted_scatter_plot)
+
+ucsc_tpm_expression_FOXR1_overexpression_disease_bar_plot <- ggplot(data = samples_with_FOXR1_log2_tpm_greater_than_two_sample_information_summary_disease_group, mapping = aes(x = "", y = count, fill = disease_group))+geom_bar(position = "stack", stat = "identity", color = "black") + labs(x = "", y = "Sample count") + labs(title = "Disease types of samples\nwith FOXR1 overexpression", x = "", y = "Sample count") + scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.ticks.x=element_blank(), axis.ticks.y=element_blank(), axis.text.y = element_text(size = 20, color = "black"), axis.text.x = element_text(size = 20, color = "black"), axis.title = element_text(size = 20, color = "black"), title = element_text(size = 20, color = "black"), legend.text = element_text(size = 20, color = "black"), legend.position="right", legend.box="vertical", legend.margin=margin(), legend.title = element_blank()) + scale_fill_manual(values = c("white","#BDC9E1","#67A9CF","#1C9099","#016C59"))
+
+ggsave(filename = here::here("results/ucsc_rna_expression","ucsc_tpm_expression_FOXR1_overexpression_disease_bar_plot.png"), plot = ucsc_tpm_expression_FOXR1_overexpression_disease_bar_plot)
+
+ucsc_tpm_expression_FOXR1_reformatted_annotated <- left_join(ucsc_tpm_expression_FOXR1_reformatted, ucsc_tumor_metadata, by = c("sample" = "th_sampleid"))
+
+percentage_of_neuroblastoma_samples_with_log2_tpm_greater_than_two_overexpression <- (ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(sample %in% samples_with_FOXR1_log2_tpm_greater_than_two_sample_information$th_sampleid & disease == "neuroblastoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())/(ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(disease == "neuroblastoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())*100
+
+percentage_of_thymoma_samples_with_log2_tpm_greater_than_two_overexpression <- (ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(sample %in% samples_with_FOXR1_log2_tpm_greater_than_two_sample_information$th_sampleid & disease == "thymoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())/(ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(disease == "thymoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())*100
+
+percentage_of_thyroid_carcinoma_samples_with_log2_tpm_greater_than_two_overexpression <- (ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(sample %in% samples_with_FOXR1_log2_tpm_greater_than_two_sample_information$th_sampleid & disease == "thyroid carcinoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())/(ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(disease == "thyroid carcinoma") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())*100
+
+percentage_of_testicular_germ_cell_tumor_samples_with_log2_tpm_greater_than_two_overexpression <- (ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(sample %in% samples_with_FOXR1_log2_tpm_greater_than_two_sample_information$th_sampleid & disease == "testicular germ cell tumor") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())/(ucsc_tpm_expression_FOXR1_reformatted_annotated %>% filter(disease == "testicular germ cell tumor") %>% summarize(n_distinct(sample)) %>% unlist() %>% unname())*100
+
+percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_tibble <- tibble(disease = c("Neuroblastoma","Thymoma","Thyroid carcinoma","Testicular germ cell tumor"), percentage = c(percentage_of_neuroblastoma_samples_with_log2_tpm_greater_than_two_overexpression,percentage_of_thymoma_samples_with_log2_tpm_greater_than_two_overexpression,percentage_of_thyroid_carcinoma_samples_with_log2_tpm_greater_than_two_overexpression,percentage_of_testicular_germ_cell_tumor_samples_with_log2_tpm_greater_than_two_overexpression))
+
+percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_tibble$disease <- factor(percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_tibble$disease, levels = c("Thyroid carcinoma", "Neuroblastoma", "Thymoma", "Testicular germ cell tumor"))
+
+percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_plot <- ggplot(data = percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_tibble, mapping = aes(x = reorder(disease, -percentage), y = percentage, fill = disease))+geom_bar(color = "black", stat = "identity") + labs(title = "Proportion of samples with FOXR1\noverexpression by disease type", x = "", y = "%") + scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.ticks.x=element_blank(), axis.ticks.y=element_blank(), axis.text.y = element_text(size = 20, color = "black"), axis.text.x = element_text(size = 18, color = "black"), axis.title = element_text(size = 20, color = "black"), title = element_text(size = 20, color = "black"), legend.position = "none") + scale_y_continuous(limits = c(0,60), breaks = c(0,10,20,30,40,50,60)) + scale_fill_manual(values = c("#BDC9E1","#67A9CF","#1C9099","#016C59"))
+
+ggsave(filename = here::here("results/ucsc_rna_expression","percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_plot.png"), plot = percentage_of_samples_with_log2_tpm_greater_than_two_overexpression_plot)
+
+```
